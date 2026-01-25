@@ -1,130 +1,185 @@
-🎬 Scene Intent & Visual Planning Engine (SceneSense AI)
+# 🎬 SceneSense AI — Scene Intent & Visual Planning Engine
 
-Hackathon Project
-Transform raw film script scenes into actionable cinematic intent using LLM-based reasoning.
+SceneSense AI is a lightweight AI tool that converts **raw screenplay scenes (text)** into **structured cinematic intent** such as:
 
-🚀 Problem Statement
+✅ Emotion  
+✅ Narrative Purpose  
+✅ Visual Mood  
+✅ Camera Style  
+✅ Confidence Score  
 
-Film directors, cinematographers, and writers often start with unstructured script text.
-Converting that text into emotion, mood, camera direction, and visual planning takes time, experience, and multiple creative iterations.
+This helps film teams align faster during **pre-production** (planning shots, lighting, mood, and storytelling intent).
 
-There is no lightweight tool that:
+---
 
-Reads a scene like a human filmmaker
+## 🚀 Demo Preview (What it does)
 
-Extracts creative intent
+### ✅ Input
+Paste any screenplay scene like:
 
-Outputs production-ready guidance
+> INT. ABANDONED WAREHOUSE - NIGHT  
+> John pauses before answering. His jaw tightens.  
+> Rain echoes on the metal roof. The silence feels heavy.
 
-💡 Solution
-
-SceneSense AI is a pre-production assistant that:
-
-Analyzes a single screenplay scene
-
-Infers emotion, narrative purpose, visual mood, and camera style
-
-Returns structured JSON that can be directly used for:
-
-Storyboarding
-
-Shot planning
-
-Lighting & mood decisions
-
-Creative review prioritization
-
-All in seconds, using LLM-based reasoning.
-
-✨ Key Features
-
-🎭 Emotion Detection – primary emotional tone of the scene
-
-🧠 Narrative Intent – why the scene exists in the story
-
-🎥 Camera Style Suggestions – framing & movement ideas
-
-🌗 Visual Mood – lighting & atmosphere guidance
-
-📊 Confidence Score – how strongly the intent is inferred
-
-⚡ Real-time Analysis via Groq LLMs
-
-🖥️ Clean Streamlit UI (no setup for users)
-
-🛠️ Tech Stack
-
-Frontend / App: Streamlit
-
-LLM Inference: Groq API
-
-Model Used: llama-3.1-8b-instant
-
-Language: Python
-
-Secrets Management: .env + .gitignore
-
-🧪 Example Input
-INT. ABANDONED WAREHOUSE – NIGHT
-
-John pauses before answering. His jaw tightens.
-Rain echoes on the metal roof.
-The silence feels heavy.
-
-✅ Example Output
+### ✅ Output (Strict JSON)
+```json
 {
   "emotion": "tension",
-  "narrative_purpose": "to create suspense and foreshadow a pivotal moment",
-  "visual_mood": "dark, foreboding, isolated atmosphere",
-  "camera_style": "static framing focused on subtle facial reactions",
-  "confidence": 0.9
+  "narrative_purpose": "build anticipation and foreshadowing",
+  "visual_mood": "dark, isolated, cold atmosphere with heavy silence",
+  "camera_style": "static close-ups, slow push-in to increase suspense",
+  "confidence": 0.80
 }
 
-🧭 How to Run Locally
-1️⃣ Clone the repository
-git clone https://github.com/SakethSumanBathini/scene-intent-engine.git
+📌 Problem We Solve
+
+In filmmaking, screenplay scenes are unstructured text.
+Teams spend time repeatedly discussing:
+
+What is the emotional tone of this scene?
+
+What is the purpose of this scene in the story?
+
+What should the lighting and mood look like?
+
+What type of camera movement fits this moment?
+
+This manual process is:
+❌ slow
+❌ inconsistent
+❌ dependent on interpretation
+❌ creates miscommunication between director, DoP, storyboard team
+
+✅ SceneSense AI gives a fast, structured baseline in seconds.
+
+✅ Solution Overview
+
+SceneSense AI provides a structured cinematic breakdown using an LLM:
+
+Scene Text → AI Analysis → JSON Output + Confidence Score
+
+This helps directors and teams quickly align on:
+
+mood
+
+narrative goal
+
+visual tone
+
+framing ideas
+
+🏗️ Architecture (High Level)
+User (Browser)
+   ↓
+Streamlit UI (app.py)
+   ↓
+Prompt Builder (strict JSON format)
+   ↓
+Groq API (LLaMA 3.1 8B Instant)
+   ↓
+JSON Parser + Confidence Badge
+   ↓
+Final Output in UI
+
+⚙️ Tech Stack
+
+Python
+
+Streamlit (UI)
+
+Groq API (LLM inference)
+
+LLaMA 3.1 8B Instant
+
+python-dotenv (API key management)
+
+JSON parsing for structured output
+
+📂 Project Structure
+scene-intent-engine/
+│── app.py
+│── test_groq.py
+│── requirements.txt
+│── .env.example
+│── .gitignore
+│── README.md
+
+✅ Setup & Run Locally (VS Code)
+✅ 1. Clone the Repository
+git clone <your-repo-link>
 cd scene-intent-engine
 
-2️⃣ Create virtual environment
+✅ 2. Create Virtual Environment
+Windows (PowerShell)
 python -m venv venv
-venv\Scripts\activate   # Windows
+.\venv\Scripts\activate
 
-3️⃣ Install dependencies
+Mac/Linux
+python3 -m venv venv
+source venv/bin/activate
+
+✅ 3. Install Dependencies
 pip install -r requirements.txt
 
-4️⃣ Setup environment variables
+✅ 4. Add Groq API Key (Important)
+Create a .env file inside project folder:
 
-Create a .env file:
+✅ DO NOT upload .env to GitHub
 
-GROQ_API_KEY=your_groq_api_key_here
+GROQ_API_KEY=your_api_key_here
+
+Example .env.example file already provided:
+GROQ_API_KEY=your_api_key_here
+
+✅ 5. Run the App
+
+✅ Recommended command (works always):
+
+python -m streamlit run app.py
 
 
-⚠️ .env is ignored by git for security.
+App runs here:
+📍 http://localhost:8501
 
-5️⃣ Run the app
-streamlit run app.py
+✅ Testing Groq Connection (Optional)
 
-🎯 Hackathon Takeaway
+Use this before running UI:
 
-This project demonstrates how LLM-based reasoning can:
+python test_groq.py
 
-Convert unstructured creative text
 
-Into actionable cinematic intent
+Expected output:
 
-Saving time during early film production
+{"status":"ok"}
 
-While augmenting (not replacing) human creativity
+✅ Common Errors & Fixes
+❌ streamlit not recognized
 
-🗺️ Future Roadmap (Post-Hackathon)
+✅ Fix:
 
-📂 Multi-scene screenplay upload & batch analysis
+python -m pip install streamlit
+python -m streamlit run app.py
 
-🎞️ Automatic shot-list generation per scene
+❌ GROQ_API_KEY not found
 
-🧩 Integration with storyboard / previz tools
-(Unreal Engine, Blender, Runway)
+✅ Fix:
+Create .env file in same folder as app.py
 
-🎬 Director Mode vs Writer Mode outputs
+GROQ_API_KEY=your_api_key_here
 
-📊 Scene-level confidence dashboard
+❌ JSON output parsing error
+
+✅ Why it happens:
+Sometimes model output might not return strict JSON.
+
+✅ Fix:
+Try again OR reduce temperature OR use longer scene input.
+
+(Future Enhancements)
+
+✅ Multi-scene analysis (entire script)
+✅ Batch processing + caching
+✅ Shot-list generation from JSON output
+✅ Export to PDF / CSV
+✅ Director Mode vs Writer Mode
+✅ Integration with storyboard & previz tools
