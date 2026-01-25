@@ -1,4 +1,34 @@
 import streamlit as st
+
+st.set_page_config(
+    page_title="SceneSense AI",
+    page_icon="🎬",
+    layout="centered"
+)
+
+st.markdown("""
+<style>
+body {
+    background-color: #0f0f0f;
+    color: white;
+}
+.stButton>button {
+    background-color: #E50914;
+    color: white;
+    border-radius: 8px;
+    height: 3em;
+    width: 100%;
+}
+.card {
+    background-color: #1c1c1c;
+    padding: 20px;
+    border-radius: 12px;
+    margin-bottom: 15px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+import streamlit as st
 from groq import Groq
 import json
 import os
@@ -10,8 +40,9 @@ client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 st.set_page_config(page_title="Scene Intent Engine", layout="centered")
 
-st.title("🎬 Scene Intent & Visual Planning Engine")
-st.write("Paste a film script scene to extract emotion, mood, and visual intent.")
+st.title("🎬 SceneSense AI")
+st.caption("AI-powered Scene Intent & Visual Planning Engine")
+
 
 # Sample scenes for demo
 samples = {
@@ -43,6 +74,7 @@ if st.button("Analyze Scene"):
     else:
         with st.spinner("Analyzing scene intent..."):
             prompt = f"""
+        
 You are an AI assistant for film directors.
 
 Analyze the following script scene and infer its creative intent.
