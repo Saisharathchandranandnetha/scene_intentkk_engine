@@ -29,14 +29,9 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-
-
-# ---- Optional Groq client (you likely already have this pattern in your repo) ----
-try:
-    from groq import Groq
-except Exception:
-    Groq = None  # We'll handle gracefully
-
+# Helpers
+from ai_modules.scene_director import analyze_scene, extract_json_loose, clamp_intensity, clamp_confidence, normalize_hex, safe_get
+from ai_modules.scene_risk_analyzer import analyze_scene_risk
 
 # =========================
 # Page config + CSS
@@ -144,72 +139,6 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 def now_stamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
-
-def safe_get(d: Dict[str, Any], key: str, default=None):
-    v = d.get(key, default)
-    return default if v is None else v
-
-
-def clamp_intensity(x: Any, default: int = 5) -> int:
-    try:
-        v = int(x)
-        return max(1, min(10, v))
-    except Exception:
-        return default
-
-
-def clamp_confidence(x: Any, default: float = 0.75) -> float:
-    try:
-        v = float(x)
-        return max(0.0, min(1.0, v))
-    except Exception:
-        return default
-
-
-def normalize_hex(h: str) -> str:
-    if not h:
-        return "#111111"
-    h = h.strip()
-    if not h.startswith("#"):
-        h = "#" + h
-    # keep #RRGGBB if possible
-    if len(h) == 4:  # #RGB -> expand
-        h = "#" + "".join([c * 2 for c in h[1:]])
-    if len(h) != 7:
-        return "#111111"
-    return h
-
-
-def extract_json_loose(text: str) -> Optional[Dict[str, Any]]:
-    """
-    Tries to recover JSON from LLM responses that include extra text or code fences.
-    """
-    if not text:
-        return None
-    # strip code fences
-    text2 = re.sub(r"```(json)?", "", text, flags=re.IGNORECASE).strip("` \n\t")
-    # try direct
-    try:
-        return json.loads(text2)
-    except Exception:
-        pass
-
-    # try find first { ... } block (greedy)
-    m = re.search(r"\{.*\}", text2, flags=re.DOTALL)
-    if not m:
-        return None
-    blob = m.group(0)
-    try:
-        return json.loads(blob)
-    except Exception:
-        # common fixes: trailing commas
-        blob2 = re.sub(r",(\s*[}\]])", r"\1", blob)
-        try:
-            return json.loads(blob2)
-        except Exception:
-            return None
-
-
 def scene_splitter(script_text: str) -> List[str]:
     """
     Basic screenplay splitter using INT./EXT. headings.
@@ -232,197 +161,6 @@ def scene_splitter(script_text: str) -> List[str]:
             scenes.append(p)
 
     return scenes if scenes else [t.strip()]
-
-
-# =========================
-# Groq call (LLM)
-# =========================
-def build_prompt(scene_text: str, mode: str) -> str:
-    """
-    Strict schema prompt so output is consistently structured.
-    Keep it short enough for speed but strict enough for JSON.
-    """
-    schema = {
-        "mode": "director|writer",
-        "emotion": "string",
-        "genre": "string",
-        "tone": "string",
-        "intensity": "integer 1-10",
-        "narrative_purpose": "string",
-        "visual_mood": "string",
-        "camera_style": "string",
-        "color_palette": [
-            {"name": "string", "hex": "#RRGGBB", "usage": "string"}
-        ],
-        "shot_list": [
-            {
-                "shot_number": "int",
-                "shot_type": "string (Wide/Medium/Close-up/OTS/POV etc.)",
-                "camera_movement": "string",
-                "framing": "string",
-                "lighting": "string",
-                "purpose": "string"
-            }
-        ],
-        "storyboard_prompts": ["string", "string", "string"],
-        "writer_notes": {
-            "emotional_beat": "string",
-            "subtext": "string",
-            "dialogue_suggestions": ["string"]
-        },
-        "confidence": "float 0-1"
-    }
-
-    # writer_notes should still exist but can be minimal in director mode; or present only in writer mode
-    mode_value = "writer" if mode == "writer" else "director"
-    req_writer = "Include writer_notes with rich content." if mode_value == "writer" else "Include writer_notes but keep it brief."
-    req_shots = "Provide 5 to 8 shots in shot_list." if mode_value == "director" else "Provide 3 to 5 shots in shot_list."
-
-    return f"""
-You are SceneSense AI. Analyze the screenplay scene and return ONLY valid JSON.
-No markdown, no code fences, no extra commentary.
-
-Mode: {mode_value}
-
-Required behavior:
-- emotion: concise (e.g., tense, intimate, hopeful, eerie)
-- narrative_purpose: one strong sentence
-- visual_mood: lighting + atmosphere in one sentence
-- camera_style: movement/framing guidance in one sentence
-- genre, tone, intensity(1-10) must be present
-- color_palette: MUST be included. Provide exactly 3 cohesive colors with valid HEX codes.
-- storyboard_prompts: exactly 3 cinematic prompts
-- {req_shots}
-- The 'shot_list' array is REQUIRED.
-- confidence: 0-1
-- {req_writer}
-
-JSON schema (types guidance):
-{json.dumps(schema, indent=2)}
-
-Scene:
-{scene_text}
-""".strip()
-
-
-def call_groq(scene_text: str, mode: str, model: str, temperature: float = 0.4, max_tokens: int = 1200) -> Dict[str, Any]:
-    load_dotenv()
-    api_key = os.getenv("GROQ_API_KEY", "").strip()
-
-    if not api_key:
-        raise RuntimeError("GROQ_API_KEY not found. Add it to .env (same folder as app.py).")
-
-    if Groq is None:
-        raise RuntimeError("groq package not found. Install it or adjust your client code.")
-
-    client = Groq(api_key=api_key)
-
-    prompt = build_prompt(scene_text, mode)
-
-
-    # Dispatch based on model selection
-    if model == "llama-3.3-70b-versatile":
-        return call_qubrid(scene_text, mode, temperature, max_tokens)
-    
-    # Fallback to authentic Groq for other models
-    prompt = build_prompt(scene_text, mode)
-
-    resp = client.chat.completions.create(
-        model=model,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        messages=[
-            {"role": "system", "content": "You return strict JSON only."},
-            {"role": "user", "content": prompt},
-        ],
-    )
-
-    text = resp.choices[0].message.content if resp and resp.choices else ""
-    data = extract_json_loose(text)
-    if not isinstance(data, dict):
-        raise RuntimeError("Model returned non-JSON or invalid JSON. Try again or reduce temperature.")
-    return data
-
-
-def call_qubrid(scene_text: str, mode: str, temperature: float, max_tokens: int) -> Dict[str, Any]:
-    """
-    Calls access to Llama 70B via Qubrid API.
-    """
-    load_dotenv()
-    api_key = os.getenv("QUBRID_API_KEY", "").strip()
-    
-    if not api_key:
-        raise RuntimeError("QUBRID_API_KEY not found. Add it to .env.")
-
-    url = "https://platform.qubrid.com/api/v1/qubridai/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-
-    prompt = build_prompt(scene_text, mode)
-
-    payload = {
-        "model": "meta-llama/Llama-3.3-70B-Instruct",
-        "messages": [
-            {
-                "role": "system",
-                "content": "You return strict JSON only."
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "stream": False,  # We want a single response for parsing
-        "top_p": 0.9
-    }
-
-    try:
-        response = requests.post(url, headers=headers, data=json.dumps(payload))
-        response.raise_for_status() # Raise for 4xx/5xx
-
-        content_type = response.headers.get("Content-Type", "")
-        
-        # Handle JSON response directly if possible
-        if "application/json" in content_type:
-            resp_json = response.json()
-            # The structure from Qubrid might mimic OpenAI/Groq or be different.
-            # Based on user snippet, it returns a standard chat completion object.
-            # extracting content:
-            if "choices" in resp_json and len(resp_json["choices"]) > 0:
-                 text = resp_json["choices"][0]["message"]["content"]
-            else:
-                 # If structure is different, dump whole thing to text to try loose extraction
-                 text = json.dumps(resp_json)
-        else:
-            # Fallback for non-JSON content-type, though API usually sends JSON
-            text = response.text
-
-    except Exception as e:
-        raise RuntimeError(f"Qubrid API call failed: {e}")
-
-
-
-    data = extract_json_loose(text)
-    if not isinstance(data, dict):
-          # Try one more aggressive cleanup if standard loose extraction failed
-          try:
-              # sometimes models return ```json ... ``` with a leading phrase
-              # extract_json_loose already tries this, but let's be super explicit about errors
-              raise ValueError("Obtained text was not valid JSON even after cleanup.")
-          except:
-               pass
-          raise RuntimeError(f"Qubrid Model returned non-JSON. Raw: {text[:200]}...")
-    
-    
-    # Normalization: sometimes models return 'shots' instead of 'shot_list'
-    if "shot_list" not in data and "shots" in data:
-        data["shot_list"] = data["shots"]
-
-    return data
 
 
 # =========================
@@ -798,27 +536,39 @@ The bathroom door behind her clicks shut by itself.
                 st.warning("Please paste a longer scene (at least ~30 characters).")
                 return
 
-            with st.spinner("Analyzing scene… generating cinematic plan ✨"):
+            director_data = {}
+            risk_data = {}
+
+            with st.spinner("Analyzing scene… creating cinematic plan & assessing risks ✨"):
                 t0 = time.time()
                 try:
-                    data = call_groq(
+                    # 1. Parallelize or sequential? Sequential is safer for now.
+                    director_data = analyze_scene(
                         scene_text=scene_text.strip(),
                         mode=controls["mode"],
                         model=controls["model"],
                         temperature=controls["temperature"],
                         max_tokens=controls["max_tokens"],
                     )
+                    
+                    # 2. Risk Analyzer
+                    risk_data = analyze_scene_risk(scene_text.strip())
+
                 except Exception as e:
-                    st.error(f"LLM call failed: {e}")
+                    st.error(f"Analysis failed: {e}")
                     return
                 dt = time.time() - t0
 
-            st.success(f"✅ Analysis complete in {dt:.2f}s")
-            st.markdown("## 🔍 Scene Insight")
-            render_insight_cards(data)
+            st.success(f"✅ Full Analysis complete in {dt:.2f}s")
+            
+            # --- Director Output ---
+            st.markdown("## 🔍 Scene Insight (Director)")
+            render_insight_cards(director_data)
+
+
 
             st.markdown("## 🎞️ Cinematic Summary")
-            render_summary_cards(data)
+            render_summary_cards(director_data)
 
             st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
@@ -826,38 +576,76 @@ The bathroom door behind her clicks shut by itself.
             if controls["mode"] == "director":
                 left2, right2 = st.columns([1.1, 1], gap="large")
                 with left2:
-                    render_shot_list(data)
+                    render_shot_list(director_data)
                 with right2:
-                    render_palette(data)
+                    render_palette(director_data)
                     st.markdown("")
-                    render_storyboard_prompts(data)
+                    render_storyboard_prompts(director_data)
             else:
                 left2, right2 = st.columns([1, 1], gap="large")
                 with left2:
-                    render_writer_notes(data)
+                    render_writer_notes(director_data)
                 with right2:
-                    render_palette(data)
+                    render_palette(director_data)
                     st.markdown("")
-                    render_storyboard_prompts(data)
+                    render_storyboard_prompts(director_data)
                     st.markdown("")
-                    render_shot_list(data)  # still useful for writers too
+                    render_shot_list(director_data)  # still useful for writers too
 
             st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
             st.markdown("## ⬇️ Export")
             e1, e2 = st.columns([1, 1])
             with e1:
-                export_json_button(data)
+                export_json_button(director_data)
             with e2:
-                export_shotlist_csv(data)
+                export_shotlist_csv(director_data)
+
+            st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
+            # --- Risk Output (New) ---
+            st.markdown("## ⚠️ Production Feasibility & Risk")
+            
+            r_level = safe_get(risk_data, "overall_risk_level", "Unknown")
+            r_just = safe_get(risk_data, "justification", "")
+            
+            # Color code risk
+            if "High" in r_level:
+                r_color = "red"
+            elif "Medium" in r_level:
+                r_color = "orange"
+            else:
+                r_color = "green"
+
+            st.markdown(f"### Overall Risk: <span style='color:{r_color}; font-size:24px; font-weight:bold'>{r_level}</span>", unsafe_allow_html=True)
+            if r_just:
+                st.info(f"**Feasibility Note:** {r_just}")
+
+            # Risk Factors
+            risks = safe_get(risk_data, "detected_risks", [])
+            if risks:
+                st.markdown("#### 🚨 Detected Risk Factors")
+                cols = st.columns(min(len(risks), 3))
+                for idx, r in enumerate(risks):
+                    row_idx = idx % 3
+                    with cols[row_idx]:
+                        factor = r.get("factor", "Risk")
+                        sev = r.get("severity", "Medium")
+                        reas = r.get("reason", "")
+                        st.warning(f"**{factor}** ({sev})\n\n{reas}")
+            
+            # Mitigations
+            mits = safe_get(risk_data, "mitigation_suggestions", [])
+            if mits:
+                with st.expander("🛠️ Mitigation Suggestions", expanded=True):
+                    for m in mits:
+                        st.write(f"• {m}")
 
             if controls["show_raw"]:
-                with st.expander("📦 Raw JSON (Advanced)", expanded=False):
-                    st.json(data)
-
-            if controls["show_debug"]:
-                st.caption("Debug: Parsed keys")
-                st.code(", ".join(sorted(list(data.keys()))))
+                with st.expander("📦 Raw JSON (Director Data)", expanded=False):
+                    st.json(director_data)
+                with st.expander("📦 Raw JSON (Risk Data)", expanded=False):
+                    st.json(risk_data)
 
     # ---------- Batch Mode ----------
     with tab2:
