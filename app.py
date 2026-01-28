@@ -23,9 +23,13 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+import groq
+import requests  # New dependency for Qubrid
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
+
+
 
 # ---- Optional Groq client (you likely already have this pattern in your repo) ----
 try:
@@ -286,9 +290,10 @@ Required behavior:
 - visual_mood: lighting + atmosphere in one sentence
 - camera_style: movement/framing guidance in one sentence
 - genre, tone, intensity(1-10) must be present
-- color_palette: exactly 3 items with valid HEX
+- color_palette: MUST be included. Provide exactly 3 cohesive colors with valid HEX codes.
 - storyboard_prompts: exactly 3 cinematic prompts
 - {req_shots}
+- The 'shot_list' array is REQUIRED.
 - confidence: 0-1
 - {req_writer}
 
@@ -314,6 +319,14 @@ def call_groq(scene_text: str, mode: str, model: str, temperature: float = 0.4, 
 
     prompt = build_prompt(scene_text, mode)
 
+
+    # Dispatch based on model selection
+    if model == "llama-3.3-70b-versatile":
+        return call_qubrid(scene_text, mode, temperature, max_tokens)
+    
+    # Fallback to authentic Groq for other models
+    prompt = build_prompt(scene_text, mode)
+
     resp = client.chat.completions.create(
         model=model,
         temperature=temperature,
@@ -328,6 +341,87 @@ def call_groq(scene_text: str, mode: str, model: str, temperature: float = 0.4, 
     data = extract_json_loose(text)
     if not isinstance(data, dict):
         raise RuntimeError("Model returned non-JSON or invalid JSON. Try again or reduce temperature.")
+    return data
+
+
+def call_qubrid(scene_text: str, mode: str, temperature: float, max_tokens: int) -> Dict[str, Any]:
+    """
+    Calls access to Llama 70B via Qubrid API.
+    """
+    load_dotenv()
+    api_key = os.getenv("QUBRID_API_KEY", "").strip()
+    
+    if not api_key:
+        raise RuntimeError("QUBRID_API_KEY not found. Add it to .env.")
+
+    url = "https://platform.qubrid.com/api/v1/qubridai/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+
+    prompt = build_prompt(scene_text, mode)
+
+    payload = {
+        "model": "meta-llama/Llama-3.3-70B-Instruct",
+        "messages": [
+            {
+                "role": "system",
+                "content": "You return strict JSON only."
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": False,  # We want a single response for parsing
+        "top_p": 0.9
+    }
+
+    try:
+        response = requests.post(url, headers=headers, data=json.dumps(payload))
+        response.raise_for_status() # Raise for 4xx/5xx
+
+        content_type = response.headers.get("Content-Type", "")
+        
+        # Handle JSON response directly if possible
+        if "application/json" in content_type:
+            resp_json = response.json()
+            # The structure from Qubrid might mimic OpenAI/Groq or be different.
+            # Based on user snippet, it returns a standard chat completion object.
+            # extracting content:
+            if "choices" in resp_json and len(resp_json["choices"]) > 0:
+                 text = resp_json["choices"][0]["message"]["content"]
+            else:
+                 # If structure is different, dump whole thing to text to try loose extraction
+                 text = json.dumps(resp_json)
+        else:
+            # Fallback for non-JSON content-type, though API usually sends JSON
+            text = response.text
+
+    except Exception as e:
+        raise RuntimeError(f"Qubrid API call failed: {e}")
+
+
+
+    data = extract_json_loose(text)
+    if not isinstance(data, dict):
+          # Try one more aggressive cleanup if standard loose extraction failed
+          try:
+              # sometimes models return ```json ... ``` with a leading phrase
+              # extract_json_loose already tries this, but let's be super explicit about errors
+              raise ValueError("Obtained text was not valid JSON even after cleanup.")
+          except:
+               pass
+          raise RuntimeError(f"Qubrid Model returned non-JSON. Raw: {text[:200]}...")
+    
+    
+    # Normalization: sometimes models return 'shots' instead of 'shot_list'
+    if "shot_list" not in data and "shots" in data:
+        data["shot_list"] = data["shots"]
+
     return data
 
 
@@ -576,7 +670,7 @@ def sidebar_controls() -> Dict[str, Any]:
     "Groq model",
     options=[
         "llama-3.1-8b-instant",
-        "mixtral-8x7b-32768",
+        "llama-3.3-70b-versatile",
     ],
     index=0,
 )
